@@ -30,7 +30,7 @@ class CustomerConfig(models.FCOSConfig):
         )
         self.num_classes = 5
         # ------------------------ training cfg ---------------------- #
-        self.stop_mosaic_epoch = 2
+        self.stop_mosaic_epoch = 20
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]
