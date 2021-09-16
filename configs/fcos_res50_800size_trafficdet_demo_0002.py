@@ -19,7 +19,6 @@ class CustomerConfig(models.FCOSConfig):
             root="images",
             ann_file="annotations/train.json",
             remove_images_without_annotations=True,
-            mosaic=True,
         )
         self.test_dataset = dict(
             name="traffic5",
@@ -30,8 +29,7 @@ class CustomerConfig(models.FCOSConfig):
         )
         self.num_classes = 5
         # ------------------------ training cfg ---------------------- #
-        self.stop_mosaic_epoch = 10
-        self.basic_lr = 0.02 / 16
+        self.basic_lr = 0.002 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]
         self.nr_images_epoch = 2226

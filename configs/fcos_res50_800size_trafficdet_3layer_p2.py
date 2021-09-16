@@ -19,7 +19,6 @@ class CustomerConfig(models.FCOSConfig):
             root="images",
             ann_file="annotations/train.json",
             remove_images_without_annotations=True,
-            mosaic=True,
         )
         self.test_dataset = dict(
             name="traffic5",
@@ -30,7 +29,6 @@ class CustomerConfig(models.FCOSConfig):
         )
         self.num_classes = 5
         # ------------------------ training cfg ---------------------- #
-        self.stop_mosaic_epoch = 10
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]
@@ -38,6 +36,18 @@ class CustomerConfig(models.FCOSConfig):
         self.warm_iters = 100
         self.log_interval = 10
 
-
+        self.stride = [4, 8, 16]
+        self.in_features = ["p2", "p3", "p4"]
+        self.num_anchors = 1
+        self.anchor_offset = 0.5
+        self.object_sizes_of_interest = [
+            [-1, 64], [64, 128], [128, float("inf")]
+        ]
+        self.fpn_in_features = ["res2", "res3", "res4"]
+        self.fpn_in_strides = [4, 8, 16]
+        self.fpn_in_channels = [256, 512, 1024]
+        self.fpn_out_channels = 256
+        self.fpn_top_in_feature = "p4"
+        self.fpn_top_in_channel = 256
 Net = models.FCOS
 Cfg = CustomerConfig

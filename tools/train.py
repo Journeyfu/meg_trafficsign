@@ -110,7 +110,11 @@ def worker(args):
         # model.backbone.bottom_up.load_state_dict(weights, strict=False)
         logger.info("Loading Base-Pretrain weights...")
         weights = mge.load(args.weight_file)
-        weight_new = {k:v for k, v in weights.items() if 'pred_' not in k and '_pred' not in k and '.cls_score.bias' not in k and '.cls_score.weight' not in k}
+
+        weight_new = {k:v for k, v in weights.items() if ('pred_' not in k) and ('_pred'
+                      not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)}
+        # weight_new = {k:v for k, v in weights.items() if 'head' not in k}
+        #               and ('head.scale_list' not in k)}
         # weight_new = {k: v for k, v in weights.items() if 'pred_' not in k}
         model.load_state_dict(weight_new, strict=False)
 
@@ -122,10 +126,10 @@ def worker(args):
     train_loader = iter(build_dataloader(args.batch_size, args.dataset_dir, model.cfg))
 
     stop_mosaic_epoch = current_network.Cfg().stop_mosaic_epoch
-    enable_mosaic = model.cfg.train_dataset["mosaic"]
+    enable_mosaic = model.cfg.train_dataset["mosaic"] if "mosaic" in model.cfg.train_dataset else False
 
     for epoch in range(model.cfg.max_epoch):
-        if epoch + 1 == stop_mosaic_epoch and enable_mosaic:
+        if enable_mosaic and epoch == stop_mosaic_epoch:
             model.cfg.train_dataset["mosaic"] = False
             train_loader = iter(build_dataloader(args.batch_size, args.dataset_dir, model.cfg))
 
@@ -249,6 +253,7 @@ def build_dataloader(batch_size, dataset_dir, cfg):
         sampler=train_sampler,
         transform=T.Compose(
             transforms=[
+                # TODO: add light contrast aug
                 T.ShortestEdgeResize(
                     cfg.train_image_short_size,
                     cfg.train_image_max_size,

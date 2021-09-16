@@ -19,7 +19,6 @@ class CustomerConfig(models.FCOSConfig):
             root="images",
             ann_file="annotations/train.json",
             remove_images_without_annotations=True,
-            mosaic=True,
         )
         self.test_dataset = dict(
             name="traffic5",
@@ -37,6 +36,13 @@ class CustomerConfig(models.FCOSConfig):
         self.warm_iters = 100
         self.log_interval = 10
 
+        self.stride = [8, 16, 32]
+        self.in_features = ["p3", "p4", "p5"]
+        self.num_anchors = 1
+        self.anchor_offset = 0.5
+        self.object_sizes_of_interest = [
+            [-1, 32], [32, 128], [128, float("inf")]
+        ]
 
 Net = models.FCOS
 Cfg = CustomerConfig

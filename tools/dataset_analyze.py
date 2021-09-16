@@ -167,7 +167,7 @@ def statistics_hw_scale(wh_data):
 
 def calc_kmean(wh_data):
     print('----------统计anchor分布---------')
-    cluster_number = 9  # anchor个数
+    cluster_number = 3  # anchor个数
     kmean_clz = KMeans(cluster_number)
     kmean_clz.fit(wh_data)
     anchor_nx2 = kmean_clz.cluster_centers_
@@ -178,6 +178,6 @@ if __name__ == '__main__':
     args = parse_args()
     cfg = import_from_file(args.file).Cfg()
     wh_data = select_data(cfg, args)
-    statistics_hw_ratio(wh_data)
-    statistics_hw_scale(wh_data)
+    # statistics_hw_ratio(wh_data)
+    # statistics_hw_scale(wh_data)
     calc_kmean(wh_data)

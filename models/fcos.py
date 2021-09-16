@@ -68,6 +68,7 @@ class FCOS(M.Module):
         return normed_image
 
     def forward(self, image, im_info, gt_boxes=None):
+
         image = self.preprocess_image(image)
         features = self.backbone(image)
         features = [features[f] for f in self.in_features]
@@ -278,7 +279,7 @@ class FCOSConfig:
             root="train2017",
             ann_file="annotations/instances_train2017.json",
             remove_images_without_annotations=True,
-
+            mosaic=False,
         )
         self.test_dataset = dict(
             name="coco",
@@ -289,6 +290,7 @@ class FCOSConfig:
         self.num_classes = 80
         self.img_mean = [103.530, 116.280, 123.675]  # BGR
         self.img_std = [57.375, 57.120, 58.395]
+        self.stop_mosaic_epoch = 18
         # ----------------------- net cfg ------------------------- #
         self.stride = [8, 16, 32, 64, 128]
         self.in_features = ["p3", "p4", "p5", "p6", "p7"]
