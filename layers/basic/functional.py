@@ -9,11 +9,11 @@
 from typing import Optional
 
 import numpy as np
-
+import megengine.module as M
 import megengine.distributed as dist
 import megengine.functional as F
 from megengine import Tensor
-
+from megengine.autodiff import Function
 
 def get_padded_tensor(
     array: Tensor, multiple_number: int = 32, pad_value: float = 0
@@ -114,3 +114,45 @@ def all_reduce_mean(array: Tensor) -> Tensor:
     if dist.get_world_size() > 1:
         array = dist.functional.all_reduce_sum(array) / dist.get_world_size()
     return array
+
+
+class ScaleGradient(Function):
+
+    @staticmethod
+    def forward(self, input, scale):
+        self.scale = scale
+
+        return input
+
+    @staticmethod
+    def backward(self, grad_output):
+        return grad_output * self.scale
+
+
+def add_conv(in_ch, out_ch, kernel_size, stride):
+    module_list = list()
+    pad = (kernel_size - 1) // 2
+    module_list.append(M.Conv2d(in_ch, out_ch, kernel_size, stride, pad, bias=False))
+    module_list.append(M.BatchNorm2d(out_ch))
+    module_list.append(M.LeakyReLU(0.1))
+    return M.Sequential(*module_list)
+
+# def np_kldivloss(input, target, log_target, reduction='mean'):
+#     if log_target:
+#         output = np.exp(target)*(target - input)
+#     else:
+#         output_pos = target*(np.log(target) - input)
+#         zeros = np.zeros_like(input)
+#         output = np.where(target>0, output_pos, zeros)
+#     if reduction == 'mean':
+#         return np.mean(output)
+#     elif reduction == 'sum':
+#         return np.sum(output)
+#     else:
+#         return output
+
+def kl_div(logsoftmax_pred, softmax_target):
+
+    output_pos = softmax_target * (F.log(softmax_target) - logsoftmax_pred)
+
+    return F.mean(output_pos)

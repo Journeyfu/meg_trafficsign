@@ -24,7 +24,7 @@ class FCOS(M.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-
+        self.enable_dysfl = cfg.enable_dysfl
         self.anchor_generator = layers.AnchorPointGenerator(
             cfg.num_anchors,
             strides=self.cfg.stride,
@@ -79,6 +79,13 @@ class FCOS(M.Module):
             _.transpose(0, 2, 3, 1).reshape(image.shape[0], -1, self.cfg.num_classes)
             for _ in box_logits
         ]
+        layer_numel = np.cumsum([box_logit.shape[1] for box_logit in box_logits_list]*2)
+        layer_numel_pair = []
+        for i in range(len(layer_numel)):
+            if i == 0:
+                layer_numel_pair.append([0, layer_numel[i]])
+            else:
+                layer_numel_pair.append([layer_numel[i-1], layer_numel[i]])
         box_offsets_list = [
             _.transpose(0, 2, 3, 1).reshape(image.shape[0], -1, 4) for _ in box_offsets
         ]
@@ -106,18 +113,31 @@ class FCOS(M.Module):
             gt_ctrness = gt_ctrness.flatten()
 
             valid_mask = gt_labels >= 0
+
             fg_mask = gt_labels > 0
             num_fg = fg_mask.sum()
 
             gt_targets = F.zeros_like(all_level_box_logits)
             gt_targets[fg_mask, gt_labels[fg_mask] - 1] = 1
 
-            loss_cls = layers.sigmoid_focal_loss(
-                all_level_box_logits[valid_mask],
-                gt_targets[valid_mask],
-                alpha=self.cfg.focal_loss_alpha,
-                gamma=self.cfg.focal_loss_gamma,
-            ).sum() / F.maximum(num_fg, 1)
+            if self.enable_dysfl:
+                loss_cls_layer = 0
+                for i in range(len(layer_numel)): # 每层算一个参数
+                    st, ed = layer_numel_pair[i]
+                    layer_valid_mask = valid_mask[st:ed]
+                    loss_cls = layers.sigmoid_dynamic_focal_loss(
+                        all_level_box_logits[st:ed][layer_valid_mask],
+                        gt_targets[st:ed][layer_valid_mask]
+                    )
+                    loss_cls_layer += loss_cls.sum()
+                loss_cls = loss_cls_layer / len(layer_numel)
+            else:
+                loss_cls = layers.sigmoid_focal_loss(
+                    all_level_box_logits[valid_mask],
+                    gt_targets[valid_mask],
+                    alpha=self.cfg.focal_loss_alpha,
+                    gamma=self.cfg.focal_loss_gamma,
+                ).sum() / F.maximum(num_fg, 1)
 
             if num_fg == 0:
                 loss_bbox = all_level_box_offsets.sum() * 0.

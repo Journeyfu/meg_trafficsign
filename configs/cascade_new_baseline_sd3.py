@@ -9,7 +9,7 @@
 import models
 
 
-class CustomerConfig(models.FCOSConfig):
+class CustomerConfig(models.FasterRCNNConfig):
     def __init__(self):
         super().__init__()
 
@@ -19,7 +19,6 @@ class CustomerConfig(models.FCOSConfig):
             root="images",
             ann_file="annotations/train.json",
             remove_images_without_annotations=True,
-            mosaic=True,
         )
         self.test_dataset = dict(
             name="traffic5",
@@ -29,8 +28,24 @@ class CustomerConfig(models.FCOSConfig):
             remove_images_without_annotations=False,
         )
         self.num_classes = 5
+        self.cascade_head_ious = (0.5, 0.7, 0.9)
+        self.anchor_scales = [[x] for x in [32, 64, 128]]
+        self.fpn_stride = [4, 8, 16]
+        self.fpn_in_features = ["res2", "res3", "res4"]
+        self.fpn_in_strides = [4, 8, 16]
+        self.fpn_in_channels = [256, 512, 1024]
+
+        self.rpn_stride = [4, 8, 16]
+        self.rpn_in_features = ["p2", "p3", "p4"]
+        self.rpn_channel = 256
+
+        self.rcnn_stride = [4, 8, 16]
+        self.rcnn_in_features = ["p2", "p3", "p4"]
         # ------------------------ training cfg ---------------------- #
-        self.stop_mosaic_epoch = 10
+        self.enable_cascade=True
+        self.num_losses = 1 + 2 + 2 * 3 + 3 - 1
+        self.enable_self_distill=True
+        self.stop_mosaic_epoch = 18
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]
@@ -38,6 +53,5 @@ class CustomerConfig(models.FCOSConfig):
         self.warm_iters = 100
         self.log_interval = 10
 
-
-Net = models.FCOS
+Net = models.FasterRCNN
 Cfg = CustomerConfig

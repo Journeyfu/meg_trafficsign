@@ -9,7 +9,7 @@
 import models
 
 
-class CustomerConfig(models.FCOSConfig):
+class CustomerConfig(models.FasterRCNNConfig):
     def __init__(self):
         super().__init__()
 
@@ -28,7 +28,10 @@ class CustomerConfig(models.FCOSConfig):
             remove_images_without_annotations=False,
         )
         self.num_classes = 5
+
         # ------------------------ training cfg ---------------------- #
+        self.enable_cascade=True
+        self.stop_mosaic_epoch = 18
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]
@@ -36,13 +39,5 @@ class CustomerConfig(models.FCOSConfig):
         self.warm_iters = 100
         self.log_interval = 10
 
-        self.stride = [8, 16, 32]
-        self.in_features = ["p3", "p4", "p5"]
-        self.num_anchors = 1
-        self.anchor_offset = 0.5
-        self.object_sizes_of_interest = [
-            [-1, 32], [32, 128], [128, float("inf")]
-        ]
-
-Net = models.FCOS
+Net = models.FasterRCNN
 Cfg = CustomerConfig

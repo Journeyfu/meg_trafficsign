@@ -1,160 +1,150 @@
-# -*- coding: utf-8 -*-
-# Copyright 2019 - present, Facebook, Inc
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ---------------------------------------------------------------------
-# MegEngine is Licensed under the Apache License, Version 2.0 (the "License")
-#
-# Copyright (c) 2014-2021 Megvii Inc. All rights reserved.
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT ARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#
-# This file has been modified by Megvii ("Megvii Modifications").
-# All Megvii Modifications are Copyright (C) 2014-2021 Megvii Inc. All rights reserved.
-# ---------------------------------------------------------------------
+
 import math
 from typing import List
 
 import megengine.functional as F
+
 import megengine.module as M
-
+import megengine as mge
 import layers
-
-
-class BiFPN(M.Module):
+from functools import partial
+class SingleModule(M.Module):
     """
     This module implements Feature Pyramid Network.
-    It creates pyramid features built on top of some input feature maps which
-    are produced by the backbone networks like ResNet.
+    It creates pyramid features built on top of some input feature maps.
     """
 
-    # pylint: disable=dangerous-default-value
     def __init__(
-        self,
-        bottom_up: M.Module,
-        in_features: List[str],
-        out_channels: int = 256,
-        norm: str = None,
-        top_block: M.Module = None,
-        strides: List[int] = [8, 16, 32],
-        channels: List[int] = [512, 1024, 2048],
+        self, in_channels_list, out_channels, norm
     ):
-        """
-        Args:
-            bottom_up (M.Module): module representing the bottom up sub-network.
-                it generates multi-scale feature maps which formatted as a
-                dict like {'res3': res3_feature, 'res4': res4_feature}
-            in_features (list[str]): list of input feature maps keys coming
-                from the `bottom_up` which will be used in FPN.
-                e.g. ['res3', 'res4', 'res5']
-            out_channels (int): number of channels used in the output
-                feature maps.
-            norm (str): the normalization type.
-            top_block (nn.Module or None): the module build upon FPN layers.
-        """
-        super(BiFPN, self).__init__()
+        super(SingleModule, self).__init__()
 
-        in_strides = strides
-        in_channels = channels
-        norm = layers.get_norm(norm)
+        self.out_channels = out_channels
+        self.in_channels_list = in_channels_list
+        # build 3-levels bifpn
+        self.nodes_input_offset = [
+            [1, 2],
+            [0, 3],
+            [1, 3, 4],
+            [2, 5]
+        ]
+        self.nodes_strides = [8, 4, 8, 16]
+        self.all_nodes_strides = [4, 8, 16, 8, 4, 8, 16]
+        norm_func = None if norm is None else norm(out_channels)
+        self.resample_conv_edge = list()
 
-        use_bias = norm is None
-        self.lateral_convs = list()
-        self.output_convs = list()
+        for node_in_inds in self.nodes_input_offset:
+            resample_conv_edge_i = list()
+            for in_ind in node_in_inds:
+                if self.in_channels_list[in_ind] != out_channels:
+                    resample_conv = layers.Conv2d(
+                        self.in_channels_list[in_ind],
+                        out_channels,
+                        kernel_size=1,
+                        stride=1,
+                        bias=norm is None,
+                        norm=norm_func,
+                    )
+                else:
+                    resample_conv = M.Identity()
+                resample_conv_edge_i.append(resample_conv)
+                self.in_channels_list.append(out_channels)
+            self.resample_conv_edge.append(resample_conv_edge_i)
 
-        for idx, in_channels in enumerate(in_channels):
-            lateral_norm = None if norm is None else norm(out_channels)
-            output_norm = None if norm is None else norm(out_channels)
+        self.edge_weights = list()
+        for node_in_inds in self.nodes_input_offset:
+            weight_i = mge.Parameter(F.ones(len(node_in_inds)))
+            self.edge_weights.append(weight_i)
 
-            lateral_conv = layers.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=1,
-                bias=use_bias,
-                norm=lateral_norm,
-            )
-            output_conv = layers.Conv2d(
+        self.fusion_convs = list()
+
+        for _ in self.nodes_input_offset:
+            fusion_conv = layers.SaperableConvBlock(
                 out_channels,
                 out_channels,
                 kernel_size=3,
-                stride=1,
-                padding=1,
-                bias=use_bias,
-                norm=output_norm,
+                padding="SAME",
+                norm=norm_func,
+                activation=None
             )
-            M.init.msra_normal_(lateral_conv.weight, mode="fan_in")
-            M.init.msra_normal_(output_conv.weight, mode="fan_in")
+            self.fusion_convs.append(fusion_conv)
+        self.act = lambda x: x * F.sigmoid(x)
+        self.down_sampling = M.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.up_sampling = partial(F.vision.interpolate, scale_factor=2, align_corners=False)
 
-            if use_bias:
-                M.init.fill_(lateral_conv.bias, 0)
-                M.init.fill_(output_conv.bias, 0)
+    def forward(self, inputs): # inputs: list
+        nodes_features = inputs
 
-            stage = int(math.log2(in_strides[idx]))
+        for node_ind, (node_in_inds, node_stride) in enumerate(
+                zip(self.nodes_input_offset, self.nodes_strides)):
+            # node_ind 是 每个新结点的编号
+            weights_i = F.softmax(self.edge_weights[node_ind],axis=0)
+            edge_features = list()
 
-            setattr(self, "fpn_lateral{}".format(stage), lateral_conv)
-            setattr(self, "fpn_output{}".format(stage), output_conv)
-            self.lateral_convs.insert(0, lateral_conv)
-            self.output_convs.insert(0, output_conv)
+            for num_idx, in_ind in enumerate(node_in_inds):
+                # num_idx表示该结点的每个入度边
+                cur_node_stride = self.all_nodes_strides[in_ind]
+                edge_feature = nodes_features[in_ind] # 每个结点入度的输入feature
+                resample_conv = self.resample_conv_edge[node_ind][num_idx] # 对feature的维度转换
+                edge_feature = resample_conv(edge_feature)
+                if cur_node_stride == node_stride * 2: # 当前输入图像小
+                    edge_feature = self.up_sampling(edge_feature) # B, C, H, W
+                elif cur_node_stride * 2 == node_stride: # 当前输入图像大
+                    edge_feature = self.down_sampling(edge_feature)
+                edge_feature = edge_feature * ( weights_i[num_idx] / weights_i.sum() + 1e-4)
+                edge_features.append(edge_feature)
 
-        self.top_block = top_block
+            node_i_feature = sum(edge_features)
+            node_i_feature = self.act(node_i_feature)
+
+            node_i_feature = self.fusion_convs[node_ind](node_i_feature)
+            nodes_features.append(node_i_feature)
+
+        assert len(nodes_features) == 7
+        return nodes_features[-3:]
+
+class BiFPN(M.Module):
+    """
+    BiFPN without top_block
+    """
+    # pylint: disable=dangerous-default-value
+    def __init__(
+        self, bottom_up, in_features, out_channels, norm,
+        num_repeats, strides, in_channels
+    ):
+        assert len(in_features) == 3
+        super(BiFPN, self).__init__()
         self.in_features = in_features
+        norm = layers.get_norm(norm)
         self.bottom_up = bottom_up
 
-        # follow the common practices, FPN features are named to "p<stage>",
-        # like ["p2", "p3", ..., "p6"]
         self._out_feature_strides = {
-            "p{}".format(int(math.log2(s))): s for s in in_strides
+            "p{}".format(int(math.log2(s))): s for s in strides
         }
-
-        # top block output feature maps.
-        if self.top_block is not None:
-            for s in range(stage, stage + self.top_block.num_levels):
-                self._out_feature_strides["p{}".format(s + 1)] = 2 ** (s + 1)
-
-        self._out_features = list(sorted(self._out_feature_strides.keys()))
+        self._out_features = list(sorted(self._out_feature_strides.keys())) # p2, p4, p8
         self._out_feature_channels = {k: out_channels for k in self._out_features}
 
+        self.repeated_bifpn = list()
+        for i in range(num_repeats):
+            if i == 0:
+                in_channels_list = in_channels
+            else:
+                in_channels_list = [ out_channels for _ in range(len(self._out_features))]
+
+            self.repeated_bifpn.append(SingleModule(
+                in_channels_list, out_channels, norm
+            ))
+
     def forward(self, x):
+
         bottom_up_features = self.bottom_up.extract_features(x)
-        x = [bottom_up_features[f] for f in self.in_features[::-1]]
 
-        results = []
-        prev_features = self.lateral_convs[0](x[0])
-        results.append(self.output_convs[0](prev_features))
+        feats = [bottom_up_features[f] for f in self.in_features] # list
 
-        for features, lateral_conv, output_conv in zip(
-            x[1:], self.lateral_convs[1:], self.output_convs[1:]
-        ):
-            top_down_features = F.nn.interpolate(
-                prev_features, features.shape[2:], mode="BILINEAR"
-            )
-            lateral_features = lateral_conv(features)
-            prev_features = lateral_features + top_down_features
-            results.insert(0, output_conv(prev_features))
+        for bifpn in self.repeated_bifpn:
+             feats = bifpn(feats)
 
-        if self.top_block is not None:
-            top_block_in_feature = bottom_up_features.get(
-                self.top_block.in_feature, None
-            )
-            if top_block_in_feature is None:
-                top_block_in_feature = results[
-                    self._out_features.index(self.top_block.in_feature)
-                ]
-            results.extend(self.top_block(top_block_in_feature))
-
-        return dict(zip(self._out_features, results))
+        return dict(zip(self._out_features, feats))
 
     def output_shape(self):
         return {
@@ -166,37 +156,3 @@ class BiFPN(M.Module):
         }
 
 
-class FPNP6(M.Module):
-    """
-    used in FPN, generate a downsampled P6 feature from P5.
-    """
-
-    def __init__(self, in_feature="p5"):
-        super().__init__()
-        self.num_levels = 1
-        self.in_feature = in_feature
-        self.pool = M.MaxPool2d(kernel_size=1, stride=2, padding=0)
-
-    def forward(self, x):
-        return [self.pool(x)]
-
-
-class LastLevelP6P7(M.Module):
-    """
-    This module is used in RetinaNet to generate extra layers, P6 and P7 from
-    C5 feature.
-    """
-
-    def __init__(self, in_channels: int, out_channels: int, in_feature="res5"):
-        super().__init__()
-        self.num_levels = 2
-        if in_feature == "p5":
-            assert in_channels == out_channels
-        self.in_feature = in_feature
-        self.p6 = M.Conv2d(in_channels, out_channels, 3, 2, 1)
-        self.p7 = M.Conv2d(out_channels, out_channels, 3, 2, 1)
-
-    def forward(self, x):
-        p6 = self.p6(x)
-        p7 = self.p7(F.relu(p6))
-        return [p6, p7]

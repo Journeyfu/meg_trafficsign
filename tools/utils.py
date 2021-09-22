@@ -140,7 +140,6 @@ class DetectionPadCollator(Collator):
                     np.float32
                 )
             )
-
             _, current_height, current_width = image.shape
             assert len(boxes) == len(boxes_category)
             num_instances = len(boxes)
@@ -243,6 +242,7 @@ class DetEvaluator:
         """
         box_cls, box_delta = self.pred_func(**inputs)
         # box_cls, box_delta = self.model(**inputs)
+
         box_cls, box_delta = box_cls.numpy(), box_delta.numpy()
         dtboxes_all = list()
         all_inds = np.where(box_cls > self.model.cfg.test_cls_threshold)
@@ -251,10 +251,8 @@ class DetEvaluator:
             inds = np.where(all_inds[1] == c)[0]
             inds = all_inds[0][inds]
             scores = box_cls[inds, c]
-            if self.model.cfg.class_aware_box:
-                bboxes = box_delta[inds, c, :]
-            else:
-                bboxes = box_delta[inds, :]
+
+            bboxes = box_delta[inds, :]
 
             dtboxes = np.hstack((bboxes, scores[:, np.newaxis])).astype(np.float32)
 

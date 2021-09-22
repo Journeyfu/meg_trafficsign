@@ -8,7 +8,7 @@
 # "AS IS" BASIS, WITHOUT ARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 import megengine.functional as F
 import megengine.module as M
-
+import numpy as np
 import layers
 
 
@@ -24,8 +24,8 @@ class RCNN(M.Module):
         self.stride = cfg.rcnn_stride
         self.pooling_method = cfg.pooling_method
         self.pooling_size = cfg.pooling_size
-
-        self.fc1 = M.Linear(256 * self.pooling_size[0] * self.pooling_size[1], 1024)
+        self.rpn_in_channels = cfg.fpn_out_channels
+        self.fc1 = M.Linear(self.rpn_in_channels * self.pooling_size[0] * self.pooling_size[1], 1024)
         self.fc2 = M.Linear(1024, 1024)
         for l in [self.fc1, self.fc2]:
             M.init.normal_(l.weight, std=0.01)
@@ -33,21 +33,24 @@ class RCNN(M.Module):
 
         # box predictor
         self.pred_cls = M.Linear(1024, cfg.num_classes + 1)
-        self.pred_delta = M.Linear(1024, cfg.num_classes * 4)
+        self.pred_delta = M.Linear(1024, 4)
+        # self.pred_delta = M.Linear(1024, cfg.num_classes * 4)
         M.init.normal_(self.pred_cls.weight, std=0.01)
         M.init.normal_(self.pred_delta.weight, std=0.001)
         for l in [self.pred_cls, self.pred_delta]:
             M.init.fill_(l.bias, 0)
 
     def forward(self, fpn_fms, rcnn_rois, im_info=None, gt_boxes=None):
+
         rcnn_rois, labels, bbox_targets = self.get_ground_truth(
             rcnn_rois, im_info, gt_boxes
         )
 
         fpn_fms = [fpn_fms[x] for x in self.in_features]
-        pool_features = layers.roi_pool(
+        pool_features = layers.roi_pool( # (1024, 256, 7, 7)
             fpn_fms, rcnn_rois, self.stride, self.pooling_size, self.pooling_method,
         )
+
         flatten_feature = F.flatten(pool_features, start_axis=1)
         roi_feature = F.relu(self.fc1(flatten_feature))
         roi_feature = F.relu(self.fc2(roi_feature))
@@ -57,12 +60,16 @@ class RCNN(M.Module):
         if self.training:
             # loss for rcnn classification
             loss_rcnn_cls = F.loss.cross_entropy(pred_logits, labels, axis=1)
+
             # loss for rcnn regression
-            pred_offsets = pred_offsets.reshape(-1, self.cfg.num_classes, 4)
+            # pred_offsets = pred_offsets.reshape(-1, self.cfg.num_classes, 4)
+            pred_offsets = pred_offsets.reshape(-1, 4)
             num_samples = labels.shape[0]
             fg_mask = labels > 0
+
+
             loss_rcnn_bbox = layers.smooth_l1_loss(
-                pred_offsets[fg_mask, labels[fg_mask] - 1],
+                pred_offsets[fg_mask],
                 bbox_targets[fg_mask],
                 self.cfg.rcnn_smooth_l1_beta,
             ).sum() / F.maximum(num_samples, 1)
@@ -71,16 +78,18 @@ class RCNN(M.Module):
                 "loss_rcnn_cls": loss_rcnn_cls,
                 "loss_rcnn_bbox": loss_rcnn_bbox,
             }
+
             return loss_dict
         else:
             # slice 1 for removing background
             pred_scores = F.softmax(pred_logits, axis=1)[:, 1:]
             pred_offsets = pred_offsets.reshape(-1, 4)
-            target_shape = (rcnn_rois.shape[0], self.cfg.num_classes, 4)
-            # rois (N, 4) -> (N, 1, 4) -> (N, 80, 4) -> (N * 80, 4)
-            base_rois = F.broadcast_to(
-                F.expand_dims(rcnn_rois[:, 1:5], axis=1), target_shape).reshape(-1, 4)
-            pred_bbox = self.box_coder.decode(base_rois, pred_offsets)
+            # target_shape = (rcnn_rois.shape[0], self.cfg.num_classes, 4)
+            # # rois (N, 4) -> (N, 1, 4) -> (N, 80, 4) -> (N * 80, 4)
+            # base_rois = F.broadcast_to(
+            #     F.expand_dims(rcnn_rois[:, 1:5], axis=1), target_shape).reshape(-1, 4)
+            pred_bbox = self.box_coder.decode(rcnn_rois[:, 1:5], pred_offsets)
+
             return pred_bbox, pred_scores
 
     def get_ground_truth(self, rpn_rois, im_info, gt_boxes):

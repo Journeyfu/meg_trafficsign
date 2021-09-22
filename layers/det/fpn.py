@@ -109,6 +109,7 @@ class FPN(M.Module):
             self.output_convs.insert(0, output_conv)
 
         self.top_block = top_block
+
         self.in_features = in_features
         self.bottom_up = bottom_up
 
@@ -128,10 +129,13 @@ class FPN(M.Module):
 
     def forward(self, x):
         bottom_up_features = self.bottom_up.extract_features(x)
-        x = [bottom_up_features[f] for f in self.in_features[::-1]]
+
+        x = [bottom_up_features[f] for f in self.in_features[::-1]]  # 逆序排列
 
         results = []
-        prev_features = self.lateral_convs[0](x[0])
+
+        prev_features = self.lateral_convs[0](x[0]) # 2048 - 512
+
         results.append(self.output_convs[0](prev_features))
 
         for features, lateral_conv, output_conv in zip(

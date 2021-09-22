@@ -9,8 +9,10 @@ from collections import defaultdict
 import random
 import cv2
 import numpy as np
-
+import megengine.functional as F
 from megengine.data.dataset.vision.meta_vision import VisionDataset
+from megengine.data.transform.vision.transform import VisionTransform
+from megengine.data.transform.vision import functional as TF
 import megengine as mge
 logger = mge.get_logger(__name__)
 logger.setLevel("INFO")
@@ -38,7 +40,8 @@ class Traffic5(VisionDataset):
     )
 
     def __init__(
-        self, root, ann_file, remove_images_without_annotations=False, mosaic=False, *, order=None
+        self, root, ann_file, remove_images_without_annotations=False, mosaic=False,
+            rand_aug=False, *, order=None
     ):
         super().__init__(root, order=order, supported_order=self.supported_order)
 
@@ -46,6 +49,7 @@ class Traffic5(VisionDataset):
             dataset = json.load(f)
 
         self.enable_mosaic = mosaic
+        self.rand_aug = rand_aug
         logger.info("enable_mosaic: {}".format(mosaic) )
         self.imgs = dict()
         for img in dataset["images"]:
@@ -152,12 +156,14 @@ class Traffic5(VisionDataset):
         anno = self.img_to_anns[img_id]
         target = []
 
-        for k in self.order: # "image", "boxes", "boxes_category","info"
+        for k in self.order: # "image", "boxes", "boxes_category", "info"
             if k == "image":
                 file_name = self.imgs[img_id]["file_name"]
                 path = os.path.join(self.root, file_name)
                 # print(path)
                 image = cv2.imread(path, cv2.IMREAD_COLOR)
+                if self.rand_aug:
+                    image = rand_aug_tansform(image)
                 target.append(image)
             elif k == "boxes":
                 boxes = [obj["bbox"] for obj in anno]
@@ -187,6 +193,7 @@ class Traffic5(VisionDataset):
         img_id = self.ids[index]
         img_info = self.imgs[img_id]
         return img_info
+
 
     class_names = (
         "red_tl",
@@ -248,3 +255,58 @@ class Traffic5(VisionDataset):
             y_scale = target_shape[1] / h_i
 
         return img_i, x_l, x_r, y_l, y_r, x_scale, y_scale
+
+
+
+class RandomGaussianNoise(VisionTransform):
+    r"""
+    Add random gaussian noise to the input data.
+    Gaussian noise is generated with given mean and std.
+
+    :param mean: Gaussian mean used to generate noise.
+    :param std: Gaussian standard deviation used to generate noise.
+    :param order: the same with :class:`VisionTransform`
+    """
+
+    def __init__(self, mean=0.0, std=1.0, *, order=None):
+        super().__init__(order)
+        self.mean = np.array(mean, dtype=np.float32)
+        self.std = np.array(std, dtype=np.float32)
+
+    def _apply_image(self, image):
+        p = random.random()
+        if p > 0.5:
+            dtype = image.dtype
+            noise = np.random.normal(self.mean, self.std, image.shape) * 255
+            image = image + noise.astype(np.float32)
+            return np.clip(image, 0, 255).astype(dtype)
+        else:
+            return image
+    def _apply_coords(self, coords):
+        return coords
+
+    def _apply_mask(self, mask):
+        return mask
+
+def rand_aug_tansform(cv2_image):
+    im_shape = cv2_image.shape
+    dtype = cv2_image.dtype
+    p = random.random()
+    if p > 0.5: # RandomGaussianNoise(0, 0.05),
+        noise = np.random.normal(0,0.05, im_shape) * 255
+        cv2_image = cv2_image + noise.astype(np.float32)
+        cv2_image = np.clip(cv2_image, 0, 255).astype(dtype)
+    p = random.random()
+
+    if p > 0.5: # T.BrightnessTransform(0.5),
+        alpha = np.random.uniform(max(0, 1 - 0.5), 1 + 0.5)
+        cv2_image = cv2_image * alpha
+        cv2_image = cv2_image.clip(0, 255).astype(dtype)
+
+    p = random.random()
+    if p > 0.5: # T.ContrastTransform(0.5)
+        alpha = np.random.uniform(max(0, 1 - 0.5), 1 + 0.5)
+        cv2_image = cv2_image * alpha + TF.to_gray(cv2_image).mean() * (1 - alpha)
+        cv2_image = cv2_image.clip(0, 255).astype(dtype)
+
+    return cv2_image

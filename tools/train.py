@@ -11,7 +11,7 @@ import bisect
 import copy
 import os
 import time
-from tools.dataset import Traffic5
+from tools.dataset import Traffic5, RandomGaussianNoise
 import megengine as mge
 import megengine.distributed as dist
 from megengine.autodiff import GradManager
@@ -27,7 +27,7 @@ from tools.utils import (
     get_config_info,
     import_from_file
 )
-from tools.data_prefetcher import DataPrefetcher
+# from tools.data_prefetcher import DataPrefetcher
 
 logger = mge.get_logger(__name__)
 logger.setLevel("INFO")
@@ -90,6 +90,7 @@ def worker(args):
             continue
         params_with_grad.append(param)
 
+
     opt = SGD(
         params_with_grad,
         lr=model.cfg.basic_lr * args.batch_size,
@@ -107,15 +108,16 @@ def worker(args):
         gm.attach(params_with_grad)
 
     if args.weight_file is not None:
-        # model.backbone.bottom_up.load_state_dict(weights, strict=False)
+
         logger.info("Loading Base-Pretrain weights...")
         weights = mge.load(args.weight_file)
-
+        # model.backbone.bottom_up.load_state_dict(weights, strict=False)
         weight_new = {k:v for k, v in weights.items() if ('pred_' not in k) and ('_pred'
-                      not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)}
-        # weight_new = {k:v for k, v in weights.items() if 'head' not in k}
-        #               and ('head.scale_list' not in k)}
-        # weight_new = {k: v for k, v in weights.items() if 'pred_' not in k}
+                      not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)
+                      and 'head.scale_list' not in k}
+        # weight_new = {k:v for k, v in weights.items() if ('pred_' not in k) and ('_pred'
+        #               not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)}
+        # # weight_new = {k: v for k, v in weights.items() if 'pred_' not in k}
         model.load_state_dict(weight_new, strict=False)
 
     if dist.get_world_size() > 1:
@@ -253,13 +255,12 @@ def build_dataloader(batch_size, dataset_dir, cfg):
         sampler=train_sampler,
         transform=T.Compose(
             transforms=[
-                # TODO: add light contrast aug
                 T.ShortestEdgeResize(
                     cfg.train_image_short_size,
                     cfg.train_image_max_size,
                     sample_style="choice",
                 ),
-                T.RandomHorizontalFlip(),
+                # T.RandomHorizontalFlip(),
                 T.ToMode(),
             ],
             order=["image", "boxes", "boxes_category"],

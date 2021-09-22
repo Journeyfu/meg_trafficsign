@@ -10,7 +10,7 @@ import numpy as np
 
 import megengine.functional as F
 import megengine.module as M
-
+from megengine.module.normalization import GroupNorm
 import layers
 
 
@@ -39,18 +39,35 @@ class RPN(M.Module):
         self.matcher = layers.Matcher(
             cfg.match_thresholds, cfg.match_labels, cfg.match_allow_low_quality
         )
+        self.rpn_in_channels = cfg.fpn_out_channels
+        # TODO： 解藕
+        rpn_cls_conv = []
+        rpn_box_conv = []
+        for i in range(2):
+            if i == 0:
+                in_ch = self.rpn_in_channels
+            else:
+                in_ch = rpn_channel
+            rpn_cls_conv.append(M.Conv2d(in_ch, rpn_channel, kernel_size=3, stride=1, padding=1))
+            rpn_cls_conv.append(GroupNorm(32, rpn_channel))
+            rpn_cls_conv.append(M.LeakyReLU(0.1))
+            rpn_box_conv.append(M.Conv2d(in_ch, rpn_channel, kernel_size=3, stride=1, padding=1))
+            rpn_box_conv.append(GroupNorm(32, rpn_channel))
+            rpn_box_conv.append(M.LeakyReLU(0.1))
+        self.rpn_cls_conv = M.Sequential(*rpn_cls_conv)
+        self.rpn_box_conv = M.Sequential(*rpn_box_conv)
 
-        self.rpn_conv = M.Conv2d(256, rpn_channel, kernel_size=3, stride=1, padding=1)
         self.rpn_cls_score = M.Conv2d(
             rpn_channel, self.num_cell_anchors, kernel_size=1, stride=1
         )
         self.rpn_bbox_offsets = M.Conv2d(
             rpn_channel, self.num_cell_anchors * 4, kernel_size=1, stride=1
         )
-
-        for l in [self.rpn_conv, self.rpn_cls_score, self.rpn_bbox_offsets]:
-            M.init.normal_(l.weight, std=0.01)
-            M.init.fill_(l.bias, 0)
+        self.enable_SimOTA = True
+        for l in [*self.rpn_cls_conv, *self.rpn_box_conv, self.rpn_cls_score, self.rpn_bbox_offsets]:
+            if hasattr(l, "weight"):
+                M.init.normal_(l.weight, std=0.01)
+                M.init.fill_(l.bias, 0)
 
     def forward(self, features, im_info, boxes=None):
         # prediction
@@ -62,8 +79,9 @@ class RPN(M.Module):
         pred_cls_logit_list = []
         pred_bbox_offset_list = []
         for x in features:
-            t = F.relu(self.rpn_conv(x))
-            scores = self.rpn_cls_score(t)
+            cls_t = F.relu(self.rpn_cls_conv(x))
+            box_t = F.relu(self.rpn_box_conv(x))
+            scores = self.rpn_cls_score(cls_t)
             pred_cls_logit_list.append(
                 scores.reshape(
                     scores.shape[0],
@@ -72,7 +90,7 @@ class RPN(M.Module):
                     scores.shape[3],
                 )
             )
-            bbox_offsets = self.rpn_bbox_offsets(t)
+            bbox_offsets = self.rpn_bbox_offsets(box_t)
             pred_bbox_offset_list.append(
                 bbox_offsets.reshape(
                     bbox_offsets.shape[0],
@@ -82,12 +100,16 @@ class RPN(M.Module):
                     bbox_offsets.shape[3],
                 )
             )
+
         # get rois from the predictions
         rpn_rois = self.find_top_rpn_proposals(
             pred_cls_logit_list, pred_bbox_offset_list, anchors_list, im_info
         )
 
         if self.training:
+
+            # anchor_all_level = F.tile(F.concat(anchors_list, axis=0), (bs, 1))
+
             rpn_labels, rpn_offsets = self.get_ground_truth(
                 anchors_list, boxes, im_info[:, 4].astype(np.int32)
             )
@@ -103,6 +125,11 @@ class RPN(M.Module):
             loss_rpn_cls = F.loss.binary_cross_entropy(
                 pred_cls_logits[valid_mask], rpn_labels[valid_mask]
             )
+            # sup_logits = pred_cls_logits[valid_mask]
+            # sup_labels = rpn_labels[valid_mask]
+            #
+            # loss_rpn_cls = layers.sigmoid_focal_loss(sup_logits, sup_labels,
+            #     alpha=0.8, gamma=2).sum() / max(len(sup_logits), 1)
 
             # rpn regression loss
             loss_rpn_bbox = layers.smooth_l1_loss(
@@ -115,6 +142,16 @@ class RPN(M.Module):
             return rpn_rois, loss_dict
         else:
             return rpn_rois
+
+    # def get_shape_transpose(self, pred_cls_list, pred_offset_list, anchors_list):
+    #     pred_cls = []
+    #     pred_offset = []
+    #     bs = pred_cls_list[0].shape[0]
+    #     for i in range(len(pred_cls_list)):  # level
+    #         pred_cls.append(F.transpose(F.flatten(pred_cls_list[i], 2), (0, 2, 1)))
+    #         pred_offset.append(F.transpose(F.flatten(pred_offset_list[i], 2), (0, 2, 1)))
+    #     return F.concat(pred_cls, axis=1), F.concat(pred_offset, axis=1), \
+    #            F.tile(F.concat(anchors_list, axis=0), (bs, 1))
 
     def find_top_rpn_proposals(
         self, rpn_cls_score_list, rpn_bbox_offset_list, anchors_list, im_info
@@ -141,6 +178,8 @@ class RPN(M.Module):
             ):
                 # get proposals and scores
                 offsets = rpn_bbox_offset[bid].transpose(2, 3, 0, 1).reshape(-1, 4)
+
+                # anchors: N, 4
                 proposals = self.box_coder.decode(anchors, offsets)
 
                 scores = rpn_cls_score[bid].transpose(1, 2, 0).flatten()
@@ -161,7 +200,9 @@ class RPN(M.Module):
             proposals = layers.get_clipped_boxes(proposals, im_info[bid])
             # filter invalid proposals and apply total level nms
             keep_mask = layers.filter_boxes(proposals)
+            assert len(keep_mask) == len(proposals)
             proposals = proposals[keep_mask]
+
             scores = scores[keep_mask]
             levels = levels[keep_mask]
             nms_keep_inds = layers.batched_nms(

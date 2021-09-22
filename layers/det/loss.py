@@ -56,6 +56,17 @@ def sigmoid_focal_loss(
         loss *= targets * alpha + (1 - targets) * (1 - alpha)
     return loss
 
+def sigmoid_dynamic_focal_loss(
+    logits: Tensor, targets: Tensor, sc_gamma=2, delta=0.5, w=0.5,
+) -> Tensor:
+    scores = F.sigmoid(logits)
+    loss = binary_cross_entropy(logits, targets)
+    gamma = - F.log((targets * scores).sum() / targets.sum())
+    gamma = F.clip(gamma, lower=sc_gamma-delta, upper=sc_gamma+delta).detach()
+    alpha = (w / gamma).detach()
+    loss *= (targets * (1 - scores) + (1 - targets) * scores) ** gamma
+    loss *= targets * alpha + (1 - targets) * (1 - alpha)
+    return loss
 
 def smooth_l1_loss(pred: Tensor, target: Tensor, beta: float = 1.0) -> Tensor:
     r"""Smooth L1 Loss

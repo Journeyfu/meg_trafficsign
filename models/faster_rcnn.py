@@ -28,25 +28,45 @@ class FasterRCNN(M.Module):
             norm=layers.get_norm(cfg.backbone_norm), pretrained=cfg.backbone_pretrained
         )
         del bottom_up.fc
+        backbone_name = cfg.backbone_name
+        self.enable_asff = cfg.enable_asff
 
         # ----------------------- build FPN ----------------------------- #
+        # if backbone_name == "FPN":
+        top_block = None if len(cfg.fpn_in_features) < 4 else layers.FPNP6()
         self.backbone = layers.FPN(
             bottom_up=bottom_up,
             in_features=cfg.fpn_in_features,
             out_channels=cfg.fpn_out_channels,
             norm=cfg.fpn_norm,
-            top_block=layers.FPNP6(),
+            top_block=top_block,
             strides=cfg.fpn_in_strides,
             channels=cfg.fpn_in_channels,
         )
-
+        if self.enable_asff:
+            self.asff = layers.ASFF(cfg)
+        # else:
+        #     self.backbone = layers.BiFPN( #  仅用3层
+        #         bottom_up=bottom_up,
+        #         in_features=cfg.fpn_in_features,
+        #         out_channels=cfg.fpn_out_channels,
+        #         norm=cfg.fpn_norm,
+        #         num_repeats=cfg.bifpn_repeat,
+        #         strides=cfg.fpn_in_strides,
+        #         in_channels=cfg.fpn_in_channels,
+        #     )
         # ----------------------- build RPN ----------------------------- #
         self.rpn = layers.RPN(cfg)
 
         # ----------------------- build RCNN head ----------------------- #
-        self.rcnn = layers.RCNN(cfg)
+        if cfg.enable_cascade:
+            self.rcnn = layers.CascadeRCNN(cfg)
+        else:
+            self.rcnn = layers.RCNN(cfg)
+
 
     def preprocess_image(self, image):
+
         padded_image = layers.get_padded_tensor(image, 32, 0.0)
         normed_image = (
             padded_image
@@ -56,8 +76,11 @@ class FasterRCNN(M.Module):
 
     def forward(self, image, im_info, gt_boxes=None):
         image = self.preprocess_image(image)
+
         features = self.backbone(image)
 
+        if self.enable_asff:
+            features = self.asff(features)
         if self.training:
             return self._forward_train(features, im_info, gt_boxes)
         else:
@@ -67,25 +90,20 @@ class FasterRCNN(M.Module):
         rpn_rois, rpn_losses = self.rpn(features, im_info, gt_boxes)
         rcnn_losses = self.rcnn(features, rpn_rois, im_info, gt_boxes)
 
-        loss_rpn_cls = rpn_losses["loss_rpn_cls"]
-        loss_rpn_bbox = rpn_losses["loss_rpn_bbox"]
-        loss_rcnn_cls = rcnn_losses["loss_rcnn_cls"]
-        loss_rcnn_bbox = rcnn_losses["loss_rcnn_bbox"]
-        total_loss = loss_rpn_cls + loss_rpn_bbox + loss_rcnn_cls + loss_rcnn_bbox
-
-        loss_dict = {
-            "total_loss": total_loss,
-            "rpn_cls": loss_rpn_cls,
-            "rpn_bbox": loss_rpn_bbox,
-            "rcnn_cls": loss_rcnn_cls,
-            "rcnn_bbox": loss_rcnn_bbox,
-        }
+        total_loss = 0
+        for v in rpn_losses.values():
+            total_loss += v
+        for v in rcnn_losses.values():
+            total_loss += v
+        loss_dict = {"total_loss": total_loss}
+        loss_dict.update(rpn_losses)
+        loss_dict.update(rcnn_losses)
         self.cfg.losses_keys = list(loss_dict.keys())
         return loss_dict
 
     def inference(self, features, im_info):
         rpn_rois = self.rpn(features, im_info)
-        pred_boxes, pred_score = self.rcnn(features, rpn_rois)
+        pred_boxes, pred_score = self.rcnn(features, rpn_rois, im_info)
         pred_boxes = pred_boxes.reshape(-1, 4)
 
         scale_w = im_info[0, 1] / im_info[0, 3]
@@ -93,7 +111,7 @@ class FasterRCNN(M.Module):
         pred_boxes = pred_boxes / F.concat([scale_w, scale_h, scale_w, scale_h], axis=0)
         clipped_boxes = layers.get_clipped_boxes(
             pred_boxes, im_info[0, 2:4]
-        ).reshape(-1, self.cfg.num_classes, 4)
+        ).reshape(-1, 4)
         return pred_score, clipped_boxes
 
 
@@ -109,7 +127,8 @@ class FasterRCNNConfig:
         self.fpn_in_strides = [4, 8, 16, 32]
         self.fpn_in_channels = [256, 512, 1024, 2048]
         self.fpn_out_channels = 256
-
+        self.backbone_name = "FPN"
+        self.bifpn_repeat=1
         # ------------------------ data cfg -------------------------- #
         self.train_dataset = dict(
             name="coco",
@@ -151,6 +170,9 @@ class FasterRCNNConfig:
         self.rcnn_reg_mean = [0.0, 0.0, 0.0, 0.0]
         self.rcnn_reg_std = [0.1, 0.1, 0.2, 0.2]
 
+        self.num_fc = 2
+        self.fc_dim = 1024
+
         self.pooling_method = "roi_align"
         self.pooling_size = (7, 7)
 
@@ -159,14 +181,33 @@ class FasterRCNNConfig:
         self.fg_threshold = 0.5
         self.bg_threshold_high = 0.5
         self.bg_threshold_low = 0.0
-        self.class_aware_box = True
+
+
+        # ------------------------ self_dist cfg -------------------------- #
+
+        self.enable_self_distill = False
+        self.dist_tau = 1.5
+        # ------------------------ asff cfg -------------------------- #
+        self.enable_asff = False
+
+        self.asff_in_features = ["p2", "p3", "p4"]
+        self.asff_mid_channels = [256, 256, 256]
+        # ------------------------ cascade cfg -------------------------- #
+        self.enable_cascade = False
+
+        self.num_cascade_stages = 3
+        self.cascade_head_ious = (0.5, 0.6, 0.7)
+        self.box_reg_weights = ((10.0, 10.0, 5.0, 5.0),
+                                (20.0, 20.0, 10.0, 10.0),
+                                (30.0, 30.0, 15.0, 15.0))
 
         # ------------------------ loss cfg -------------------------- #
         self.rpn_smooth_l1_beta = 0  # use L1 loss
         self.rcnn_smooth_l1_beta = 0  # use L1 loss
-        self.num_losses = 5
+        self.num_losses = 1+2+2*self.num_cascade_stages
 
         # ------------------------ training cfg ---------------------- #
+
         self.train_image_short_size = (640, 672, 704, 736, 768, 800)
         self.train_image_max_size = 1333
         self.train_prev_nms_top_n = 2000

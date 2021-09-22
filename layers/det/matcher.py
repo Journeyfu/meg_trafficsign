@@ -34,6 +34,8 @@ class Matcher:
         labels = F.full_like(match_indices, -1)
 
         for label, low, high in zip(self.labels, self.thresholds[:-1], self.thresholds[1:]):
+            # -inf ~ thresh : 0
+            # thresh ~ +inf : 1
             mask = (max_scores >= low) & (max_scores < high)
             labels[mask] = label
 

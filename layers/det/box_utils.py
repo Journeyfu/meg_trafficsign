@@ -36,6 +36,7 @@ class BoxCoder(BoxCoderBase, metaclass=ABCMeta):
         self,
         reg_mean=[0.0, 0.0, 0.0, 0.0],
         reg_std=[1.0, 1.0, 1.0, 1.0],
+        weights=(10.0, 10.0, 5.0, 5.0),
     ):
         """
         Args:
@@ -45,6 +46,7 @@ class BoxCoder(BoxCoderBase, metaclass=ABCMeta):
         """
         self.reg_mean = np.array(reg_mean, dtype=np.float32)[None, :]
         self.reg_std = np.array(reg_std, dtype=np.float32)[None, :]
+        self.weights = weights
         super().__init__()
 
     @staticmethod
@@ -68,11 +70,11 @@ class BoxCoder(BoxCoderBase, metaclass=ABCMeta):
     def encode(self, bbox: Tensor, gt: Tensor) -> Tensor:
         bbox_width, bbox_height, bbox_ctr_x, bbox_ctr_y = self._box_ltrb_to_cs_opr(bbox)
         gt_width, gt_height, gt_ctr_x, gt_ctr_y = self._box_ltrb_to_cs_opr(gt)
-
-        target_dx = (gt_ctr_x - bbox_ctr_x) / bbox_width
-        target_dy = (gt_ctr_y - bbox_ctr_y) / bbox_height
-        target_dw = F.log(gt_width / bbox_width)
-        target_dh = F.log(gt_height / bbox_height)
+        wx, wy, ww, wh = self.weights
+        target_dx = wx * (gt_ctr_x - bbox_ctr_x) / bbox_width
+        target_dy = wy * (gt_ctr_y - bbox_ctr_y) / bbox_height
+        target_dw = ww * F.log(gt_width / bbox_width)
+        target_dh = wh * F.log(gt_height / bbox_height)
         target = F.stack([target_dx, target_dy, target_dw, target_dh], axis=1)
 
         target -= self.reg_mean
@@ -82,17 +84,21 @@ class BoxCoder(BoxCoderBase, metaclass=ABCMeta):
     def decode(self, anchors: Tensor, deltas: Tensor) -> Tensor:
         deltas *= self.reg_std
         deltas += self.reg_mean
-
+        wx, wy, ww, wh = self.weights
         (
             anchor_width,
             anchor_height,
             anchor_ctr_x,
             anchor_ctr_y,
         ) = self._box_ltrb_to_cs_opr(anchors, 1)
-        pred_ctr_x = anchor_ctr_x + deltas[:, 0::4] * anchor_width
-        pred_ctr_y = anchor_ctr_y + deltas[:, 1::4] * anchor_height
-        pred_width = anchor_width * F.exp(deltas[:, 2::4])
-        pred_height = anchor_height * F.exp(deltas[:, 3::4])
+        dx = deltas[:, 0::4] / wx
+        dy = deltas[:, 1::4] / wy
+        dw = deltas[:, 2::4] / ww
+        dh = deltas[:, 3::4] / wh
+        pred_ctr_x = anchor_ctr_x + dx * anchor_width
+        pred_ctr_y = anchor_ctr_y + dy * anchor_height
+        pred_width = anchor_width * F.exp(dw)
+        pred_height = anchor_height * F.exp(dh)
 
         pred_x1 = pred_ctr_x - 0.5 * pred_width
         pred_y1 = pred_ctr_y - 0.5 * pred_height

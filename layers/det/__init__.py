@@ -15,9 +15,11 @@ from .matcher import *
 from .point_head import *
 from .pooler import *
 from .rcnn import *
+from .cascade_rcnn import *
 from .rpn import *
 from .sampling import *
-# from .bifpn import *
+from .bifpn import *
+from .asff import *
 
 _EXCLUDE = {}
 __all__ = [k for k in globals().keys() if k not in _EXCLUDE and not k.startswith("_")]

@@ -27,6 +27,9 @@
 from collections import namedtuple
 
 import megengine.module as M
+import megengine.functional as F
+
+import math
 
 
 class Conv2d(M.Conv2d):
@@ -53,6 +56,98 @@ class Conv2d(M.Conv2d):
 
     def forward(self, x):
         x = super().forward(x)
+        if self.norm is not None:
+            x = self.norm(x)
+        if self.activation is not None:
+            x = self.activation(x)
+        return x
+
+class Conv2dSamePadding(M.Conv2d):
+    def __init__(self, *args, **kwargs):
+        norm = kwargs.pop("norm", None)
+        activation = kwargs.pop("activation", None)
+
+        self.padding_mode = kwargs.pop("padding", None)
+
+        if self.padding_mode is None:
+            self.padding_mode = 0
+
+        if isinstance(self.padding_mode, str):
+            assert self.padding_mode == "SAME"
+            super().__init__(*args, **kwargs, padding=0)
+        else:
+            super().__init__(*args, **kwargs, padding=self.padding_mode)
+
+        self.norm = norm
+        self.activation = activation
+
+    def forward(self, x):
+        if isinstance(self.padding_mode, str):
+
+            # TODO： 确定shape维度
+            input_h, input_w = x.shape[-2:]
+            stride_h, stride_w = self.stride
+            kernel_h, kernel_w = self.kernel_size
+            dilation_h, dilation_w = self.dilation
+
+            output_h = math.ceil(input_h / stride_h)
+            output_w = math.ceil(input_w / stride_w)
+            padding_h = max(0, (output_h-1)*stride_h + (kernel_h -1) * dilation_h + 1 - input_h)
+            padding_w = max(0, (output_w-1)*stride_w + (kernel_w -1) * dilation_w + 1 - input_w)
+            left = padding_w // 2
+            right = padding_w - left
+            top = padding_h // 2
+            bottom = padding_h - top
+
+            x = self.pad(x, [left, top, right, bottom])
+
+        x = super().forward(x)
+        if self.norm is not None:
+            x = self.norm(x)
+        if self.activation is not None:
+            x = self.activation(x)
+        return x
+
+    def pad(self, x, pad_list, pad_value=0):
+        # pad_list: l, t, r, b
+        batch, chl, t_height, t_width = x.shape
+        l_pad, t_pad, r_pad, b_pad = pad_list
+        padded_height = t_height + t_pad + b_pad
+        padded_width = t_width + l_pad + r_pad
+
+        padded_x = F.full(
+            (batch, chl, padded_height, padded_width), pad_value, dtype=x.dtype
+        )
+        padded_x[:, :, t_pad:-b_pad, l_pad:-r_pad] = x
+
+        return padded_x
+
+
+class SaperableConvBlock(M.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, bias=True, norm=None, activation=None):
+        super().__init__()
+        self.norm = norm
+        self.activation = activation
+        self.depthwise_conv = Conv2dSamePadding(in_channels=in_channels,
+                                                out_channels=out_channels,
+                                                kernel_size=kernel_size,
+                                                stride=stride,
+                                                padding=padding,
+                                                dilation=dilation,
+                                                groups=in_channels,
+                                                bias=False)
+        self.pointwise_conv = Conv2dSamePadding(in_channels=in_channels,
+                                                out_channels=out_channels,
+                                                kernel_size=1,
+                                                stride=1,
+                                                padding=0,
+                                                dilation=1,
+                                                groups=1,
+                                                bias=bias)
+    def forward(self, x):
+        x = self.depthwise_conv(x)
+        x = self.pointwise_conv(x)
         if self.norm is not None:
             x = self.norm(x)
         if self.activation is not None:

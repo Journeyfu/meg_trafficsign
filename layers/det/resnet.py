@@ -209,6 +209,7 @@ class ResNet(M.Module):
             dilate=replace_stride_with_dilation[2],
             norm=norm,
         )
+
         self.fc = M.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
@@ -259,6 +260,7 @@ class ResNet(M.Module):
                 norm=norm,
             )
         )
+        # block.expansion = 4
         self.in_channels = channels * block.expansion
         for _ in range(1, blocks):
             layers.append(
@@ -275,21 +277,24 @@ class ResNet(M.Module):
         return M.Sequential(*layers)
 
     def extract_features(self, x):
+
         outputs = {}
         x = self.conv1(x)
         x = self.bn1(x)
         x = F.relu(x)
         x = self.maxpool(x)
-        outputs["stem"] = x
+
+        outputs["stem"] = x  # 64
 
         x = self.layer1(x)
-        outputs["res2"] = x
+        outputs["res2"] = x  # 256 64
         x = self.layer2(x)
-        outputs["res3"] = x
+        outputs["res3"] = x  # 512 128
         x = self.layer3(x)
-        outputs["res4"] = x
+        outputs["res4"] = x  # 1024 256
         x = self.layer4(x)
-        outputs["res5"] = x
+        outputs["res5"] = x  # 2048 512
+
         return outputs
 
     def forward(self, x):
