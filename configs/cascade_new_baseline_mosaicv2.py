@@ -19,6 +19,8 @@ class CustomerConfig(models.FasterRCNNConfig):
             root="images",
             ann_file="annotations/train.json",
             remove_images_without_annotations=True,
+            mosaic=True,
+            rand_aug=True,
         )
         self.test_dataset = dict(
             name="traffic5",
@@ -28,7 +30,8 @@ class CustomerConfig(models.FasterRCNNConfig):
             remove_images_without_annotations=False,
         )
         self.num_classes = 5
-        self.cascade_head_ious = (0.5, 0.7, 0.9)
+        self.enable_asff = True
+        self.cascade_head_ious = (0.5, 0.8, 0.9)
         self.anchor_scales = [[x] for x in [32, 64, 128]]
         self.fpn_stride = [4, 8, 16]
         self.fpn_in_features = ["res2", "res3", "res4"]
@@ -45,7 +48,9 @@ class CustomerConfig(models.FasterRCNNConfig):
         self.enable_cascade=True
         self.num_losses = 1 + 2 + 2 * 3 + 3 - 1
         self.enable_self_distill=True
+        self.enlarge_roi = True
         self.stop_mosaic_epoch = 18
+        self.dist_tau = 2.5
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]

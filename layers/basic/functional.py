@@ -121,7 +121,6 @@ class ScaleGradient(Function):
     @staticmethod
     def forward(self, input, scale):
         self.scale = scale
-
         return input
 
     @staticmethod

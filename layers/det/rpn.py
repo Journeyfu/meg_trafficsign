@@ -50,10 +50,10 @@ class RPN(M.Module):
                 in_ch = rpn_channel
             rpn_cls_conv.append(M.Conv2d(in_ch, rpn_channel, kernel_size=3, stride=1, padding=1))
             rpn_cls_conv.append(GroupNorm(32, rpn_channel))
-            rpn_cls_conv.append(M.LeakyReLU(0.1))
+            rpn_cls_conv.append(M.ReLU())
             rpn_box_conv.append(M.Conv2d(in_ch, rpn_channel, kernel_size=3, stride=1, padding=1))
             rpn_box_conv.append(GroupNorm(32, rpn_channel))
-            rpn_box_conv.append(M.LeakyReLU(0.1))
+            rpn_box_conv.append(M.ReLU())
         self.rpn_cls_conv = M.Sequential(*rpn_cls_conv)
         self.rpn_box_conv = M.Sequential(*rpn_box_conv)
 
@@ -201,6 +201,7 @@ class RPN(M.Module):
             # filter invalid proposals and apply total level nms
             keep_mask = layers.filter_boxes(proposals)
             assert len(keep_mask) == len(proposals)
+
             proposals = proposals[keep_mask]
 
             scores = scores[keep_mask]

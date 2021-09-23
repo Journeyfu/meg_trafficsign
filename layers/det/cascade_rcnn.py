@@ -11,7 +11,6 @@ import megengine.module as M
 import numpy as np
 import layers
 
-
 class CascadeRCNN(M.Module):
 
     def __init__(self, cfg):
@@ -34,8 +33,8 @@ class CascadeRCNN(M.Module):
 
         # cascade parameter
 
+        self.enlarge_roi = cfg.enlarge_roi
         self.num_cascade_stages = cfg.num_cascade_stages
-
         self.box_predictor = list()
         self.box2box_transform = []
         self.proposal_matchers = []
@@ -170,15 +169,14 @@ class CascadeRCNN(M.Module):
                 rcnn_rois, non_empty_masks = self.create_proposals_from_boxes(
                     head_outputs[-1].predict_boxes_with_split(), image_sizes
                 )
-                for i in range(k):
-                    if len(valid_index[i]) == 0:
-                        valid_index[i] = F.arange(len(rcnn_rois), device=rcnn_rois.device, dtype="int32")
-                    valid_index[i] = valid_index[i][non_empty_masks]
-
                 if self.training:
+                    for i in range(k):
+                        if len(valid_index[i]) == 0:
+                            valid_index[i] = F.arange(len(rcnn_rois), device=rcnn_rois.device, dtype="int32")
+                        valid_index[i] = valid_index[i][non_empty_masks]
                     proposals_info = self.match_and_label_boxes(rcnn_rois, k, im_info, gt_targets)
 
-            head_outputs.append(self.run_stage(fpn_fms, rcnn_rois, k, proposals_info))
+            head_outputs.append(self.run_stage(fpn_fms, rcnn_rois, k, image_sizes, proposals_info))
 
         if self.training:
             losses = {}
@@ -210,7 +208,7 @@ class CascadeRCNN(M.Module):
 
             pre_pred_logsoftmax = F.logsoftmax(head_outputs_i.pred_class_logits/self.dist_tau, axis=1)
             assert len(valid_index[stage_i]) == len(final_pred)
-            loss["self_dist_stage{}".format(stage_i+1)] = 10 * layers.kl_div(pre_pred_logsoftmax[valid_index[stage_i]], final_pred)
+            loss["self_dist_stage{}".format(stage_i+1)] = 10 * layers.kl_div(pre_pred_logsoftmax[valid_index[stage_i]], final_pred.detach())
 
         return loss
 
@@ -234,17 +232,35 @@ class CascadeRCNN(M.Module):
 
             proposal_boxes.append(boxes_per_image)
         proposal_boxes = F.concat(proposal_boxes, axis=0)
-        non_empty_masks = F.concat(non_empty_masks, axis=0)
+        if self.training:
+            non_empty_masks = F.concat(non_empty_masks, axis=0)
         return proposal_boxes, non_empty_masks
 
-    def run_stage(self, fpn_fms, rcnn_rois, stage_idx, proposals_info=None):
+    def run_stage(self, fpn_fms, rcnn_rois, stage_idx, image_sizes, proposals_info=None):
+
+        if self.enlarge_roi:
+
+            batch_ind, batch_rois = rcnn_rois[:, 0:1], rcnn_rois[:, 1:]
+            batch_rois_mean = (batch_rois[:, :2] + batch_rois[:, 2:])/2
+            batch_rois_mean = F.concat([batch_rois_mean, batch_rois_mean], axis=1)
+            # 1.5 为扩大倍数
+            batch_rois_trans = (batch_rois - batch_rois_mean)*1.5 + batch_rois_mean
+            boxes_batch = []
+            for i in range(int(F.max(batch_ind))+1):
+                boxes_per_image = layers.get_clipped_boxes(
+                    batch_rois_trans[batch_ind[:, 0] == i], image_sizes[i]
+                )
+                boxes_batch.append(boxes_per_image)
+
+            boxes_batch = F.concat(boxes_batch, axis=0)
+            rcnn_rois = F.concat([batch_ind, boxes_batch], axis=1)
 
         pool_features = layers.roi_pool(
             fpn_fms, rcnn_rois, self.stride, self.pooling_size, self.pooling_method,
         ) # (1024, 256, 7, 7)
         # TODO: add
-        # box_features = layers.ScaleGradient(pool_features, 1.0 / self.num_cascade_stages)
 
+        # box_features = layers.ScaleGradient(pool_features, 1.0 / self.num_cascade_stages)
         box_features = self.box_head[stage_idx](pool_features)
         pred_class_logits, pred_proposal_deltas = self.box_predictor[stage_idx](box_features)
         # pred_class_logits: 1024, 6

@@ -8,6 +8,7 @@ import megengine.module as M
 import megengine as mge
 import layers
 from functools import partial
+
 class SingleModule(M.Module):
     """
     This module implements Feature Pyramid Network.

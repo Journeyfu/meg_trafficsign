@@ -27,8 +27,12 @@ from tools.utils import (
     get_config_info,
     import_from_file
 )
+from tools.ema import ModelEMA
 # from tools.data_prefetcher import DataPrefetcher
 
+from megengine.core._imperative_rt.core2 import config_async_level
+
+config_async_level(0)
 logger = mge.get_logger(__name__)
 logger.setLevel("INFO")
 
@@ -84,10 +88,10 @@ def worker(args):
 
     params_with_grad = []
     for name, param in model.named_parameters():
-        if "bottom_up.conv1" in name and model.cfg.backbone_freeze_at >= 1:
-            continue
-        if "bottom_up.layer1" in name and model.cfg.backbone_freeze_at >= 2:
-            continue
+        # if "bottom_up.conv1" in name and model.cfg.backbone_freeze_at >= 1:
+        #     continue
+        # if "bottom_up.layer1" in name and model.cfg.backbone_freeze_at >= 2:
+        #     continue
         params_with_grad.append(param)
 
 
@@ -117,42 +121,59 @@ def worker(args):
                       and 'head.scale_list' not in k}
         # weight_new = {k:v for k, v in weights.items() if ('pred_' not in k) and ('_pred'
         #               not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)}
-        # # weight_new = {k: v for k, v in weights.items() if 'pred_' not in k}
+        # weight_new = {k: v for k, v in weights.items() if 'pred_' not in k}
         model.load_state_dict(weight_new, strict=False)
 
     if dist.get_world_size() > 1:
         dist.bcast_list_(model.parameters(), dist.WORLD)  # sync parameters
+        dist.bcast_list_(model.buffers())  # sync buffers
 
     if dist.get_rank() == 0:
         logger.info("Prepare dataset")
+
+
     train_loader = iter(build_dataloader(args.batch_size, args.dataset_dir, model.cfg))
 
     stop_mosaic_epoch = current_network.Cfg().stop_mosaic_epoch
     enable_mosaic = model.cfg.train_dataset["mosaic"] if "mosaic" in model.cfg.train_dataset else False
 
+    if model.cfg.enable_ema:
+        ema_model = ModelEMA(model, 0.9998)
+        ema_model.updates = 0
+    else:
+        ema_model = None
     for epoch in range(model.cfg.max_epoch):
         if enable_mosaic and epoch == stop_mosaic_epoch:
             model.cfg.train_dataset["mosaic"] = False
             train_loader = iter(build_dataloader(args.batch_size, args.dataset_dir, model.cfg))
 
-        train_one_epoch(model, train_loader, opt, gm, epoch, args)
+        train_one_epoch(model, ema_model, train_loader, opt, gm, epoch, args)
         if dist.get_rank() == 0:
             save_path = "logs/{}/epoch_{}.pkl".format(
                 os.path.basename(args.file).split(".")[0] + f'_gpus{args.devices}', epoch
             )
-            mge.save(
-                {"epoch": epoch, "state_dict": model.state_dict()}, save_path,
-            )
+            save_model = ema_model.ema if model.cfg.enable_ema else model
+
+            save_dict= {"epoch": epoch, "state_dict": save_model.state_dict()}
+
+            if model.cfg.enable_ema:
+                save_dict.update({"origin_model": model.state_dict()})
+
+            mge.save(save_dict, save_path)
             logger.info("dump weights to %s", save_path)
 
 
-def train_one_epoch(model, data_queue, opt, gm, epoch, args):
+def train_one_epoch(model, ema_model, data_queue, opt, gm, epoch, args):
     def train_func(image, im_info, gt_boxes):
         with gm:
             loss_dict = model(image=image, im_info=im_info, gt_boxes=gt_boxes)
             gm.backward(loss_dict["total_loss"])
             loss_list = list(loss_dict.values())
+
         opt.step().clear_grad()
+
+        if ema_model is not None:
+            ema_model.update()
         return loss_list
 
     meter = AverageMeter(record_len=model.cfg.num_losses)
@@ -183,6 +204,7 @@ def train_one_epoch(model, data_queue, opt, gm, epoch, args):
             )
             time_str = ", train_time:%.3fs, data_time:%.3fs"
             log_info_str = info_str + loss_str + time_str
+
             meter.update([loss.numpy() for loss in loss_list])
             if step % log_interval == 0:
                 logger.info(

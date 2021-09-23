@@ -38,13 +38,14 @@ class CustomerConfig(models.FasterRCNNConfig):
         self.rpn_stride = [4, 8, 16]
         self.rpn_in_features = ["p2", "p3", "p4"]
         self.rpn_channel = 256
-
+        self.enlarge_roi = True
         self.rcnn_stride = [4, 8, 16]
         self.rcnn_in_features = ["p2", "p3", "p4"]
+        self.pooling_size = (7, 7)
+        self.fc_dim = 1024
         # ------------------------ training cfg ---------------------- #
         self.enable_cascade=True
-        self.num_losses = 1 + 2 + 2 * 3 + 3 - 1
-        self.enable_self_distill=True
+
         self.stop_mosaic_epoch = 18
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24

@@ -172,6 +172,7 @@ class FasterRCNNConfig:
 
         self.num_fc = 2
         self.fc_dim = 1024
+        self.enlarge_roi = False
 
         self.pooling_method = "roi_align"
         self.pooling_size = (7, 7)
@@ -223,6 +224,7 @@ class FasterRCNNConfig:
         self.lr_decay_rate = 0.1
         self.lr_decay_stages = [42, 50]
 
+        self.enable_ema = False
         # ------------------------ testing cfg ----------------------- #
         self.test_image_short_size = 800
         self.test_image_max_size = 1333
