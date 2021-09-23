@@ -118,14 +118,16 @@ def all_reduce_mean(array: Tensor) -> Tensor:
 
 class ScaleGradient(Function):
 
-    @staticmethod
+
     def forward(self, input, scale):
         self.scale = scale
         return input
 
-    @staticmethod
+
     def backward(self, grad_output):
         return grad_output * self.scale
+
+
 
 
 def add_conv(in_ch, out_ch, kernel_size, stride):

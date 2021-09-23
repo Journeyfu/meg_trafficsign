@@ -10,7 +10,7 @@ import megengine.functional as F
 import megengine.module as M
 import numpy as np
 import layers
-
+import megengine as mge
 class CascadeRCNN(M.Module):
 
     def __init__(self, cfg):
@@ -40,6 +40,7 @@ class CascadeRCNN(M.Module):
         self.proposal_matchers = []
 
         self.box_head = list()
+        self.scale_grad = layers.ScaleGradient()
         for k in range(self.num_cascade_stages):
             box_head_i = FastRCNNFCHEAD(cfg)
             box_pred_i = FastRCNNOutputLayers(cfg)
@@ -258,9 +259,9 @@ class CascadeRCNN(M.Module):
         pool_features = layers.roi_pool(
             fpn_fms, rcnn_rois, self.stride, self.pooling_size, self.pooling_method,
         ) # (1024, 256, 7, 7)
-        # TODO: add
 
-        # box_features = layers.ScaleGradient(pool_features, 1.0 / self.num_cascade_stages)
+
+        pool_features = self.scale_grad(pool_features, mge.tensor(1.0 / self.num_cascade_stages))
         box_features = self.box_head[stage_idx](pool_features)
         pred_class_logits, pred_proposal_deltas = self.box_predictor[stage_idx](box_features)
         # pred_class_logits: 1024, 6
