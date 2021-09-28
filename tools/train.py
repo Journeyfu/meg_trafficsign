@@ -11,14 +11,15 @@ import bisect
 import copy
 import os
 import time
-from tools.dataset import Traffic5, RandomGaussianNoise
+
+
 import megengine as mge
 import megengine.distributed as dist
 from megengine.autodiff import GradManager
 from megengine.data import DataLoader, Infinite, RandomSampler
 from megengine.data import transform as T
 from megengine.optimizer import SGD
-
+from tools.dataset import Traffic5
 from tools.data_mapper import data_mapper
 from tools.utils import (
     AverageMeter,
@@ -30,9 +31,9 @@ from tools.utils import (
 from tools.ema import ModelEMA
 # from tools.data_prefetcher import DataPrefetcher
 
-from megengine.core._imperative_rt.core2 import config_async_level
+# from megengine.core._imperative_rt.core2 import config_async_level
 
-config_async_level(0)
+# config_async_level(0)
 logger = mge.get_logger(__name__)
 logger.setLevel("INFO")
 
@@ -111,26 +112,12 @@ def worker(args):
     else:
         gm.attach(params_with_grad)
 
-    if args.weight_file is not None:
-
-        logger.info("Loading Base-Pretrain weights...")
-        weights = mge.load(args.weight_file)
-        # model.backbone.bottom_up.load_state_dict(weights, strict=False)
-        weight_new = {k:v for k, v in weights.items() if ('pred_' not in k) and ('_pred'
-                      not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)
-                      and 'head.scale_list' not in k}
-        # weight_new = {k:v for k, v in weights.items() if ('pred_' not in k) and ('_pred'
-        #               not in k) and ('.cls_score.bias' not in k) and ('.cls_score.weight' not in k)}
-        # weight_new = {k: v for k, v in weights.items() if 'pred_' not in k}
-        model.load_state_dict(weight_new, strict=False)
-
     if dist.get_world_size() > 1:
         dist.bcast_list_(model.parameters(), dist.WORLD)  # sync parameters
         dist.bcast_list_(model.buffers())  # sync buffers
 
     if dist.get_rank() == 0:
         logger.info("Prepare dataset")
-
 
     train_loader = iter(build_dataloader(args.batch_size, args.dataset_dir, model.cfg))
 

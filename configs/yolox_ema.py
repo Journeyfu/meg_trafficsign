@@ -28,23 +28,25 @@ class CustomerConfig(models.FasterRCNNConfig):
             remove_images_without_annotations=False,
         )
         self.num_classes = 5
-        self.cascade_head_ious = (0.5, 0.7, 0.9)
+
+        # ------------------------ training cfg ---------------------- #
         self.anchor_scales = [[x] for x in [32, 64, 128]]
+        self.enable_ema = True
+        self.enable_yolox = True
+
         self.fpn_stride = [4, 8, 16]
         self.fpn_in_features = ["res2", "res3", "res4"]
         self.fpn_in_strides = [4, 8, 16]
-        self.fpn_in_channels = [256, 512, 1024]
+        self.fpn_in_channels = [64, 128, 256]
+        self.fpn_out_channels = 128
 
         self.rpn_stride = [4, 8, 16]
         self.rpn_in_features = ["p2", "p3", "p4"]
-        self.rpn_channel = 256
-        self.enlarge_roi = True
+        self.rpn_channel = 128
+
         self.rcnn_stride = [4, 8, 16]
         self.rcnn_in_features = ["p2", "p3", "p4"]
-        self.pooling_size = (7, 7)
-        self.fc_dim = 1024
         # ------------------------ training cfg ---------------------- #
-        self.enable_cascade=True
 
         self.stop_mosaic_epoch = 18
         self.basic_lr = 0.02 / 16

@@ -19,7 +19,9 @@ from .cascade_rcnn import *
 from .rpn import *
 from .sampling import *
 from .bifpn import *
+from .pafpn import YOLOPAFPN
 from .asff import *
+
 
 _EXCLUDE = {}
 __all__ = [k for k in globals().keys() if k not in _EXCLUDE and not k.startswith("_")]

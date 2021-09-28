@@ -36,7 +36,7 @@ class BoxCoder(BoxCoderBase, metaclass=ABCMeta):
         self,
         reg_mean=[0.0, 0.0, 0.0, 0.0],
         reg_std=[1.0, 1.0, 1.0, 1.0],
-        weights=(10.0, 10.0, 5.0, 5.0),
+        weights=(1.0, 1.0, 1.0, 1.0),
     ):
         """
         Args:

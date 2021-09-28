@@ -27,7 +27,7 @@ class RCNN(M.Module):
         self.rpn_in_channels = cfg.fpn_out_channels
         self.fc1 = M.Linear(self.rpn_in_channels * self.pooling_size[0] * self.pooling_size[1], 1024)
         self.fc2 = M.Linear(1024, 1024)
-        for l in [self.fc1, self.fc2]:
+        for l in [self.fc1, self.fc2]: 
             M.init.normal_(l.weight, std=0.01)
             M.init.fill_(l.bias, 0)
 

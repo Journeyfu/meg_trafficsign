@@ -209,8 +209,8 @@ class CascadeRCNN(M.Module):
 
             pre_pred_logsoftmax = F.logsoftmax(head_outputs_i.pred_class_logits/self.dist_tau, axis=1)
             assert len(valid_index[stage_i]) == len(final_pred)
-            loss["self_dist_stage{}".format(stage_i+1)] = 10 * layers.kl_div(pre_pred_logsoftmax[valid_index[stage_i]], final_pred.detach())
-
+            loss["self_dist_stage{}".format(stage_i+1)] = 10 * layers.kl_div(pre_pred_logsoftmax[valid_index[stage_i]], final_pred)
+ 
         return loss
 
     def create_proposals_from_boxes(self, boxes, image_sizes):
@@ -259,8 +259,6 @@ class CascadeRCNN(M.Module):
         pool_features = layers.roi_pool(
             fpn_fms, rcnn_rois, self.stride, self.pooling_size, self.pooling_method,
         ) # (1024, 256, 7, 7)
-
-
         pool_features = self.scale_grad(pool_features, mge.tensor(1.0 / self.num_cascade_stages))
         box_features = self.box_head[stage_idx](pool_features)
         pred_class_logits, pred_proposal_deltas = self.box_predictor[stage_idx](box_features)

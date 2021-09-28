@@ -24,7 +24,7 @@ class FCOS(M.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.enable_dysfl = cfg.enable_dysfl
+
         self.anchor_generator = layers.AnchorPointGenerator(
             cfg.num_anchors,
             strides=self.cfg.stride,
@@ -120,24 +120,13 @@ class FCOS(M.Module):
             gt_targets = F.zeros_like(all_level_box_logits)
             gt_targets[fg_mask, gt_labels[fg_mask] - 1] = 1
 
-            if self.enable_dysfl:
-                loss_cls_layer = 0
-                for i in range(len(layer_numel)): # 每层算一个参数
-                    st, ed = layer_numel_pair[i]
-                    layer_valid_mask = valid_mask[st:ed]
-                    loss_cls = layers.sigmoid_dynamic_focal_loss(
-                        all_level_box_logits[st:ed][layer_valid_mask],
-                        gt_targets[st:ed][layer_valid_mask]
-                    )
-                    loss_cls_layer += loss_cls.sum()
-                loss_cls = loss_cls_layer / len(layer_numel)
-            else:
-                loss_cls = layers.sigmoid_focal_loss(
-                    all_level_box_logits[valid_mask],
-                    gt_targets[valid_mask],
-                    alpha=self.cfg.focal_loss_alpha,
-                    gamma=self.cfg.focal_loss_gamma,
-                ).sum() / F.maximum(num_fg, 1)
+
+            loss_cls = layers.sigmoid_focal_loss(
+                all_level_box_logits[valid_mask],
+                gt_targets[valid_mask],
+                alpha=self.cfg.focal_loss_alpha,
+                gamma=self.cfg.focal_loss_gamma,
+            ).sum() / F.maximum(num_fg, 1)
 
             if num_fg == 0:
                 loss_bbox = all_level_box_offsets.sum() * 0.

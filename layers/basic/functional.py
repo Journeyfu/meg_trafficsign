@@ -10,6 +10,7 @@ from typing import Optional
 
 import numpy as np
 import megengine.module as M
+import megengine as mge
 import megengine.distributed as dist
 import megengine.functional as F
 from megengine import Tensor
@@ -125,7 +126,7 @@ class ScaleGradient(Function):
 
 
     def backward(self, grad_output):
-        return grad_output * self.scale
+        return grad_output * self.scale, mge.tensor(0, device=grad_output.device)
 
 
 

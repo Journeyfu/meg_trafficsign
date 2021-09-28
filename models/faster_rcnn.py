@@ -23,39 +23,34 @@ class FasterRCNN(M.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
+
         # ----------------------- build backbone ------------------------ #
+
         bottom_up = getattr(resnet, cfg.backbone)(
             norm=layers.get_norm(cfg.backbone_norm), pretrained=cfg.backbone_pretrained
         )
         del bottom_up.fc
+
         backbone_name = cfg.backbone_name
-        self.enable_asff = cfg.enable_asff
+
 
         # ----------------------- build FPN ----------------------------- #
-        # if backbone_name == "FPN":
-        top_block = None if len(cfg.fpn_in_features) < 4 else layers.FPNP6()
-        self.backbone = layers.FPN(
-            bottom_up=bottom_up,
-            in_features=cfg.fpn_in_features,
-            out_channels=cfg.fpn_out_channels,
-            norm=cfg.fpn_norm,
-            top_block=top_block,
-            strides=cfg.fpn_in_strides,
-            channels=cfg.fpn_in_channels,
-        )
-        if self.enable_asff:
-            self.asff = layers.ASFF(cfg)
-        # else:
-        #     self.backbone = layers.BiFPN( #  仅用3层
-        #         bottom_up=bottom_up,
-        #         in_features=cfg.fpn_in_features,
-        #         out_channels=cfg.fpn_out_channels,
-        #         norm=cfg.fpn_norm,
-        #         num_repeats=cfg.bifpn_repeat,
-        #         strides=cfg.fpn_in_strides,
-        #         in_channels=cfg.fpn_in_channels,
-        #     )
-        # ----------------------- build RPN ----------------------------- #
+        if cfg.enable_yolox:
+            self.backbone = layers.YOLOPAFPN()
+        else:
+            top_block = None if len(cfg.fpn_in_features) < 4 else layers.FPNP6()
+            self.backbone = layers.FPN(
+                bottom_up=bottom_up,
+                in_features=cfg.fpn_in_features,
+                out_channels=cfg.fpn_out_channels,
+                norm=cfg.fpn_norm,
+                top_block=top_block,
+                strides=cfg.fpn_in_strides,
+                channels=cfg.fpn_in_channels,
+            )
+            # if self.enable_asff:
+            #     self.asff = layers.ASFF(cfg)
+
         self.rpn = layers.RPN(cfg)
 
         # ----------------------- build RCNN head ----------------------- #
@@ -79,8 +74,8 @@ class FasterRCNN(M.Module):
 
         features = self.backbone(image)
 
-        if self.enable_asff:
-            features = self.asff(features)
+        # if self.enable_asff:
+        #     features = self.asff(features)
         if self.training:
             return self._forward_train(features, im_info, gt_boxes)
         else:
@@ -120,6 +115,7 @@ class FasterRCNNConfig:
     def __init__(self):
         self.backbone = "resnet50"
         self.backbone_pretrained = True
+        self.backbone_hrResnet = False
         self.backbone_norm = "FrozenBN"
         self.backbone_freeze_at = 2
         self.fpn_norm = None
@@ -201,7 +197,7 @@ class FasterRCNNConfig:
         self.box_reg_weights = ((10.0, 10.0, 5.0, 5.0),
                                 (20.0, 20.0, 10.0, 10.0),
                                 (30.0, 30.0, 15.0, 15.0))
-
+        self.enable_yolox = False
         # ------------------------ loss cfg -------------------------- #
         self.rpn_smooth_l1_beta = 0  # use L1 loss
         self.rcnn_smooth_l1_beta = 0  # use L1 loss

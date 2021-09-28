@@ -34,7 +34,9 @@ class CustomerConfig(models.FasterRCNNConfig):
         self.fpn_in_features = ["res2", "res3", "res4"]
         self.fpn_in_strides = [4, 8, 16]
         self.fpn_in_channels = [256, 512, 1024]
-
+        # self.box_reg_weights = ((1.0, 1.0, 1.0, 1.0),
+        #                         (1.0, 1.0, 1.0, 1.0),
+        #                         (1.0, 1.0, 1.0, 1.0))
         self.rpn_stride = [4, 8, 16]
         self.rpn_in_features = ["p2", "p3", "p4"]
         self.rpn_channel = 256

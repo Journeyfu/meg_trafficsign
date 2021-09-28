@@ -18,6 +18,7 @@ class RPN(M.Module):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
+        self.backbone_hrResnet = cfg.backbone_hrResnet
         self.box_coder = layers.BoxCoder(cfg.rpn_reg_mean, cfg.rpn_reg_std)
 
         # check anchor settings
@@ -43,15 +44,17 @@ class RPN(M.Module):
         # TODO： 解藕
         rpn_cls_conv = []
         rpn_box_conv = []
-        for i in range(2):
+        for i in range(1):
             if i == 0:
                 in_ch = self.rpn_in_channels
             else:
                 in_ch = rpn_channel
             rpn_cls_conv.append(M.Conv2d(in_ch, rpn_channel, kernel_size=3, stride=1, padding=1))
+
             rpn_cls_conv.append(GroupNorm(32, rpn_channel))
             rpn_cls_conv.append(M.ReLU())
             rpn_box_conv.append(M.Conv2d(in_ch, rpn_channel, kernel_size=3, stride=1, padding=1))
+
             rpn_box_conv.append(GroupNorm(32, rpn_channel))
             rpn_box_conv.append(M.ReLU())
         self.rpn_cls_conv = M.Sequential(*rpn_cls_conv)
@@ -78,7 +81,7 @@ class RPN(M.Module):
 
         pred_cls_logit_list = []
         pred_bbox_offset_list = []
-        for x in features:
+        for idx, x in enumerate(features):
             cls_t = F.relu(self.rpn_cls_conv(x))
             box_t = F.relu(self.rpn_box_conv(x))
             scores = self.rpn_cls_score(cls_t)

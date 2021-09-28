@@ -9,7 +9,7 @@
 import models
 
 
-class CustomerConfig(models.FasterRCNNConfig):
+class CustomerConfig(models.FCOSConfig):
     def __init__(self):
         super().__init__()
 
@@ -19,6 +19,8 @@ class CustomerConfig(models.FasterRCNNConfig):
             root="images",
             ann_file="annotations/train.json",
             remove_images_without_annotations=True,
+            mosaic=True,
+            rand_aug=True,
         )
         self.test_dataset = dict(
             name="traffic5",
@@ -28,25 +30,9 @@ class CustomerConfig(models.FasterRCNNConfig):
             remove_images_without_annotations=False,
         )
         self.num_classes = 5
-        self.enable_ema = True
-        self.cascade_head_ious = (0.5, 0.7, 0.9)
-        self.anchor_scales = [[x] for x in [32, 64, 128]]
-        # self.fpn_stride = [2, 4, 8]
-        self.fpn_in_features = ["stem", "res2", "res3"]
-        self.fpn_in_strides = [2, 4, 8]
-        self.fpn_in_channels = [64, 256, 512]
-        self.fpn_out_channels = 64
-
-        self.rpn_stride = [2, 4, 8]
-        self.rpn_in_features = ["p1", "p2", "p3"]
-        self.rpn_channel = 64
-
-        self.rcnn_stride = [2, 4, 8]
-        self.rcnn_in_features = ["p1", "p2", "p3"]
         # ------------------------ training cfg ---------------------- #
-        self.enable_cascade=True
-
-        self.stop_mosaic_epoch = 18
+        self.enable_ema = True
+        self.stop_mosaic_epoch = 10
         self.basic_lr = 0.02 / 16
         self.max_epoch = 24
         self.lr_decay_stages = [16, 21]
@@ -54,5 +40,18 @@ class CustomerConfig(models.FasterRCNNConfig):
         self.warm_iters = 100
         self.log_interval = 10
 
-Net = models.FasterRCNN
+        self.stride = [4, 8, 16]
+        self.in_features = ["p2", "p3", "p4"]
+        self.num_anchors = 1
+        self.anchor_offset = 0.5
+        self.object_sizes_of_interest = [
+            [-1, 32], [32, 64], [64, float("inf")]
+        ]
+        self.fpn_in_features = ["res2", "res3", "res4"]
+        self.fpn_in_strides = [4, 8, 16]
+        self.fpn_in_channels = [256, 512, 1024]
+        self.fpn_out_channels = 256
+        self.fpn_top_in_feature = "p4"
+        self.fpn_top_in_channel = 256
+Net = models.FCOS
 Cfg = CustomerConfig
